@@ -28,7 +28,8 @@ dayjs.locale({
   weekStart: 1,
 });
 
-const ActiveCollab = require("./lib/ActiveCollab");
+const Jira = require("./lib/jira").default;
+const ActiveCollab = require("./lib/activecollab").default;
 
 if (!fs.existsSync(".env")) {
   fs.writeFileSync(".env", "");
@@ -41,6 +42,9 @@ let config = {
   ACTIVE_COLLAB_ACCOUNT: "",
   REDMINE_BASE_URL: "",
   REDMINE_API_KEY: "",
+  JIRA_SUBDOMAIN: "",
+  JIRA_USERNAME: "",
+  JIRA_PASSWORD: "",
   ...dotenv.parse(
     fs.readFileSync(".env", {
       encoding: "utf8",
@@ -167,7 +171,7 @@ async function selectProject(instance) {
     name: "projectName",
     type: "autocomplete",
     message: "Chose project",
-    source: (answersSoFar, input = "") =>
+    source: (_answersSoFar, input = "") =>
       new Promise((resolve) =>
         resolve(
           fuzzy
@@ -178,8 +182,6 @@ async function selectProject(instance) {
   });
 
   const project = projects.find((item) => item.name === projectName);
-
-  console.log(project);
 
   return project;
 }
@@ -284,6 +286,65 @@ async function authenticateRedmine() {
   return RedmineAPI;
 }
 
+async function authenticateJira() {
+  const remembered =
+    !!config.JIRA_SUBDOMAIN && !!config.JIRA_PASSWORD && !!config.JIRA_USERNAME;
+
+  const credentials = await inquirer.prompt([
+    {
+      message: "Subdomain",
+      name: "JIRA_SUBDOMAIN",
+      type: "input",
+      default: config.JIRA_SUBDOMAIN || "",
+      validate: validateMandatoryString("Subdomain is required"),
+      when: !config.JIRA_SUBDOMAIN,
+    },
+    {
+      message: "Email",
+      name: "JIRA_USERNAME",
+      type: "input",
+      default: config.JIRA_USERNAME || "",
+      validate: validateMandatoryString("Email is required"),
+      when: !config.JIRA_USERNAME,
+    },
+    {
+      message: "Password [masked]",
+      name: "JIRA_PASSWORD",
+      type: "password",
+      default: config.JIRA_PASSWORD || "",
+      validate: validateMandatoryString("Password is required"),
+      when: !config.JIRA_PASSWORD,
+    },
+  ]);
+
+  config = {
+    ...config,
+    ...credentials,
+  };
+
+  const API = new Jira({
+    subdomain: config.JIRA_SUBDOMAIN,
+    username: config.JIRA_USERNAME,
+    password: config.JIRA_PASSWORD,
+  });
+
+  const user = await API.user();
+
+  if (user && !remembered) {
+    const { remember } = await inquirer.prompt({
+      message: "Remember credentials?",
+      name: "remember",
+      type: "confirm",
+    });
+
+    if (remember) {
+      updateEnv(credentials);
+    }
+  }
+
+  return API;
+}
+
 (async () => {
   const response = await inquirer.prompt({
     name: "command",
@@ -304,10 +365,43 @@ async function authenticateRedmine() {
         choices: [
           { name: "ActiveCollab", value: "activecollab" },
           { name: "Redmine", value: "redmine" },
+          { name: "Jira", value: "jira" },
         ],
       });
 
       switch (response.service) {
+        case "jira": {
+          const JiraAPI = await authenticateJira();
+
+          const projects = await JiraAPI.projects();
+
+          const { projectName } = await inquirer.prompt({
+            name: "projectName",
+            type: "autocomplete",
+            message: "Chose project",
+            source: (_answersSoFar, input = "") =>
+              new Promise((resolve) =>
+                resolve(
+                  fuzzy
+                    .filter(input, projects, { extract: (item) => item.name })
+                    .map((item) => item.original)
+                )
+              ),
+          });
+
+          const project = projects.find((item) => item.name === projectName);
+
+          console.log(project);
+
+          const issues = await JiraAPI.issues({
+            jql: `project = "${project.key}" AND created >= "2022-05-29" AND created <= "2022-06-03" AND assignee = currentUser() ORDER BY created DESC`,
+          });
+
+          console.log(project, issues);
+
+          break;
+        }
+
         case "activecollab": {
           const ActiveCollabAPI = await authenticateActiveCollab();
 
@@ -346,8 +440,6 @@ async function authenticateRedmine() {
             params: {},
           }).then((response) => response.data.time_entries);
 
-          console.log(time);
-
           const res = await inquirer.prompt({
             name: "command",
             type: "list",
@@ -369,8 +461,6 @@ async function authenticateRedmine() {
               return;
             }
           }
-
-          return;
         }
       }
 

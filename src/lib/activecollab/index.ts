@@ -1,5 +1,6 @@
-const _ = require("lodash");
-const axios = require("axios").default;
+import _ from "lodash";
+import axios, { Axios } from "axios";
+import { Config, Project } from "./types";
 
 class ActiveCollabProject {
   #api;
@@ -7,14 +8,14 @@ class ActiveCollabProject {
   id;
   name;
 
-  constructor(project, api) {
+  constructor(project: Project, api: Axios) {
     this.#api = api;
 
     this.id = project.id;
     this.name = project.name;
   }
 
-  time(filter) {
+  time(filter?: { from?: string; to?: string }) {
     return this.#api
       .get(`/api/v1/projects/${this.id}/time-records/filtered-by-date`, {
         params: filter,
@@ -23,10 +24,10 @@ class ActiveCollabProject {
   }
 }
 
-class ActiveCollab {
+class ActiveCollabAPI {
   #api;
 
-  constructor(props) {
+  constructor(props: Config) {
     this.#api = axios.create({
       baseURL: `https://app.activecollab.com/${props.accountId}`,
       headers: {
@@ -38,7 +39,7 @@ class ActiveCollab {
     return this;
   }
 
-  static login(input) {
+  static login(input: { email: string; password: string }) {
     return axios
       .post("https://my.activecollab.com/api/v1/external/login", input)
       .then(({ data }) => {
@@ -54,7 +55,11 @@ class ActiveCollab {
       });
   }
 
-  static issueToken(input) {
+  static issueToken(input: {
+    intent: string;
+    client_name: string;
+    client_vendor: string;
+  }) {
     return axios
       .post(
         `https://app.activecollab.com/${input.client_name}/api/v1/issue-token`,
@@ -78,4 +83,6 @@ class ActiveCollab {
   }
 }
 
-module.exports = ActiveCollab;
+export * from "./types";
+
+export default ActiveCollabAPI;
